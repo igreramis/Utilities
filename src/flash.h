@@ -103,7 +103,7 @@ typedef enum {FAILED = 0, PASSED = !FAILED} TestStatus;
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
 /*Variable used for Erase procedure*/
-void write_page_without_erase(void * buffer,uint32_t page_st_addr);
+void write_page_without_erase(void * buffer,uint32_t page_st_addr, size_t size);
 void erase_pages(uint32_t start_page_addr, uint32_t num_pages);
 void throw_error_via_led();
 #endif /*__FLASH */

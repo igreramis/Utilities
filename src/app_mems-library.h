@@ -46,6 +46,7 @@ typedef enum
   STATUS_FIFO_DOWNLOAD,
   STATUS_SET_FIFO_BYPASS_MODE
 } DEMO_FIFO_STATUS_t;
+
 //AL
 #ifdef __cplusplus
 }

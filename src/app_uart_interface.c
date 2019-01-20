@@ -65,4 +65,9 @@ int32_t MX_APP_UART_Transmit(uint8_t *pData, uint16_t Size, uint32_t Timeout)
   return HAL_UART_Transmit(&huart2, pData, Size, Timeout);
 }
 
+int32_t MX_APP_UART_Receive(uint8_t *pData, uint16_t Size, uint32_t Timeout)
+{
+  return HAL_UART_Receive(&huart2, pData, Size, Timeout);
+}
+
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

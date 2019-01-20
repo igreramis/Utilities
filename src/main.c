@@ -21,10 +21,12 @@
 //AL
 #include "flash.h"
 #include <string.h>
+static char dataOut[FLASH_PAGE_SIZE];
+static char dataIn[FLASH_PAGE_SIZE];
+
 //AL
 
 /* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
@@ -64,7 +66,7 @@ typedef enum
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
 osThreadId LEDThread1Handle, LEDThread2Handle;
-#define USERBUTTON_TASK_STACK_SIZE				( configMINIMAL_STACK_SIZE * 4 )
+#define USERBUTTON_TASK_STACK_SIZE        ( configMINIMAL_STACK_SIZE * 4 )
 void vTaskUserButton();
 extern volatile uint8_t PushButtonDetected;
 static volatile uint8_t StartDataCollection=0;
@@ -83,11 +85,27 @@ FLASH_OBProgramInitTypeDef OptionsBytesStruct;
 void test_flash();
 //void print(char *);
 //AL
+
+void get_user_input()
+{
+  (void)snprintf(dataOut, FLASH_PAGE_SIZE, "Press USER button to start the DEMO or press 'r' to retrieve saved data...\r\n");
+  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+
+  /*See if user wants to see sensor data printed on the console */
+  if(MX_APP_UART_Receive((uint8_t *)dataIn, 1, 1000)==HAL_OK)
+  {
+    if(dataIn[0]=='r'||dataIn[0]=='R')
+    {
+      print_data();
+    }
+  }
+}
+
 int main(void)
 {
   /* MCU Configuration----------------------------------------------------------*/
-	BaseType_t xReturned;
-	TaskHandle_t xUserButtonHandle = NULL;
+  BaseType_t xReturned;
+  TaskHandle_t xUserButtonHandle = NULL;
 
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
@@ -102,16 +120,16 @@ int main(void)
   TimerHandle_t xTimer;
 
   xReturned = xTaskCreate(
-  					vTaskUserButton,       /* Function that implements the task. */
-  					"UserButton",          /* Text name for the task. */
-					USERBUTTON_TASK_STACK_SIZE,      /* Stack size in words, not bytes. */
-  					NULL,    /* Parameter passed into the task. */
-  					tskIDLE_PRIORITY,/* Priority at which the task is created. */
-  					&xUserButtonHandle );      /* Used to pass out the created task's handle. */
+            vTaskUserButton,       /* Function that implements the task. */
+            "UserButton",          /* Text name for the task. */
+          USERBUTTON_TASK_STACK_SIZE,      /* Stack size in words, not bytes. */
+            NULL,    /* Parameter passed into the task. */
+            tskIDLE_PRIORITY,/* Priority at which the task is created. */
+            &xUserButtonHandle );      /* Used to pass out the created task's handle. */
 
   if( xReturned != pdPASS )
   {
-	  return -1;
+    return -1;
   }
 
   xTimer=xTimerCreate("Timer",500,pdTRUE,(void *)0,vTimerCallback);
@@ -120,13 +138,16 @@ int main(void)
   }
   else
   {
-	  if(xTimerStart(xTimer,0)!=pdPASS)
-	  {
-		  return -1;
-	  }
+    if(xTimerStart(xTimer,0)!=pdPASS)
+    {
+      return -1;
+    }
   }
+  // test_flash();
+  test_flash_structs();
 
-  test_flash();
+  get_user_input();
+
   osKernelStart();
 
   for (;;);
@@ -135,75 +156,139 @@ int main(void)
 
 //void vTaskInitFlash(void)
 //{
-//	erase_pages(ADDR_FLASH_PAGE_33,(ADDR_FLASH_PAGE_34-ADDR_FLASH_PAGE_33)/FLASH_PAGE_SIZE);
-//	while(1);
+//  erase_pages(ADDR_FLASH_PAGE_33,(ADDR_FLASH_PAGE_34-ADDR_FLASH_PAGE_33)/FLASH_PAGE_SIZE);
+//  while(1);
 //}
+
+//what should be the size of the buffer?
+//how much data do you need to put out?
+
+typedef struct 
+{
+  int array[2];
+}test_flash_struct;
+
+void test_flash_structs()
+{
+  test_flash_struct st_data_write = {-1300, 1400};
+  test_flash_struct st_data_read;
+  
+  erase_pages(ADDR_FLASH_PAGE_293,(ADDR_FLASH_PAGE_294-ADDR_FLASH_PAGE_293)/FLASH_PAGE_SIZE);
+  write_page_without_erase(&st_data_write,ADDR_FLASH_PAGE_293, sizeof(test_flash_struct));
+  if(MemoryProgramStatus == FAILED)
+  {
+    throw_error_via_led();
+  }
+
+  read_page(&st_data_read, ADDR_FLASH_PAGE_293, sizeof(test_flash_struct));
+  if(MemoryProgramStatus == FAILED)
+  {
+    throw_error_via_led();
+  }
+  if (memcmp(&st_data_write, &st_data_read, sizeof(test_flash_struct))!=0)
+  {
+    throw_error_via_led();
+  }
+
+  erase_pages(ADDR_FLASH_PAGE_294,(ADDR_FLASH_PAGE_294-ADDR_FLASH_PAGE_293)/FLASH_PAGE_SIZE);
+  write_page_without_erase(&st_data_write,ADDR_FLASH_PAGE_294, sizeof(test_flash_struct));
+  if(MemoryProgramStatus == FAILED)
+  {
+    throw_error_via_led();
+  }
+
+  read_page(&st_data_read, ADDR_FLASH_PAGE_294, sizeof(test_flash_struct));
+  if(MemoryProgramStatus == FAILED)
+  {
+    throw_error_via_led();
+  }
+  if (memcmp(&st_data_write, &st_data_read, sizeof(test_flash_struct))!=0)
+  {
+    throw_error_via_led();
+  }  
+}
 
 void test_flash()
 {
 #define MAX_BUF_SIZE 256
-	char dataOut[MAX_BUF_SIZE];
-	uint32_t bytes_written=0, itr,start_addr=ADDR_FLASH_PAGE_293;
-	uint32_t val = DATA_32;
-	uint32_t buffer[FLASH_PAGE_SIZE/sizeof(uint32_t)];
-//
-//	for(itr=0;itr<FLASH_PAGE_SIZE/sizeof(uint32_t);itr++)
-//	{
-//	  buffer[itr]=DATA_32;
-//	}
+  char dataOut[MAX_BUF_SIZE];
+  uint32_t bytes_written=0, itr,start_addr=ADDR_FLASH_PAGE_293;
+  uint32_t val = DATA_32;
+  uint32_t buffer[FLASH_PAGE_SIZE/sizeof(uint32_t)];
+  uint32_t buffer_read[FLASH_PAGE_SIZE/sizeof(uint32_t)];
 
-	erase_pages(ADDR_FLASH_PAGE_293,(ADDR_FLASH_PAGE_294-ADDR_FLASH_PAGE_293)/FLASH_PAGE_SIZE);
-	write_page_without_erase(buffer,ADDR_FLASH_PAGE_293);
-	if(MemoryProgramStatus == FAILED)
-	{
-	  throw_error_via_led();
-	}
 
-//	/* Check the correctness of written data */
-//	while (start_addr < ADDR_FLASH_PAGE_33 + 4)//while (start_addr < ADDR_FLASH_PAGE_34)
-//	{
-//	  (void)snprintf(dataOut, MAX_BUF_SIZE, "%lx\n",(*((__IO uint32_t *)start_addr)));
-//      (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
-//	  start_addr += 64;
-//	}
+  erase_pages(ADDR_FLASH_PAGE_293,(ADDR_FLASH_PAGE_294-ADDR_FLASH_PAGE_293)/FLASH_PAGE_SIZE);
+  write_page_without_erase(buffer,ADDR_FLASH_PAGE_293, FLASH_PAGE_SIZE);
+  if(MemoryProgramStatus == FAILED)
+  {
+    throw_error_via_led();
+  }
+
+  read_page(buffer_read, ADDR_FLASH_PAGE_293, FLASH_PAGE_SIZE);
+  if(MemoryProgramStatus == FAILED)
+  {
+    throw_error_via_led();
+  }
+  if (memcmp(buffer_read, buffer, FLASH_PAGE_SIZE)!=0)
+  {
+    throw_error_via_led();
+  }
 }
 
 void vTaskUserButton(void)
 {
-	while(1)
-	{
-		if (PushButtonDetected != 0U)
-		{
-			PushButtonDetected = 0U;
-			/* Change this variable only if DemoFifoStatus is STATUS_IDLE */
-//			if (DemoFifoStatus == STATUS_IDLE)
-//			{
-			   DemoFifoStatus = STATUS_SET_FIFO_MODE;
-//			}
-			SendOrientationRequest  = 1;
+  while(1)
+  {
+    if (PushButtonDetected != 0U)
+    {
+      PushButtonDetected = 0U;
+      /* Change this variable only if DemoFifoStatus is STATUS_IDLE */
+//      if (DemoFifoStatus == STATUS_IDLE)
+//      {
+         DemoFifoStatus = STATUS_SET_FIFO_MODE;
+//      }
+      SendOrientationRequest  = 1;
 
-			StartDataCollection=(StartDataCollection==1)?0U:1U;
-		}
-	}
+      StartDataCollection=(StartDataCollection==1)?0U:1U;
+      if (!StartDataCollection)
+      {
+        get_user_input();
+      }
+    }
+  }
 }
 
 void vTimerCallback( TimerHandle_t xTimer )
 {
-
-	if(StartDataCollection)
-	{
-		BSP_LED_Toggle(LED2);
-		MX_MEMS_Library_Process();
-//		MX_MEMS_Library_Process(nine_axes);
-
-	}
+  static uint32_t num_samples=0;
+  if(StartDataCollection)
+  {
+    BSP_LED_Toggle(LED2);
+    MX_MEMS_Library_Process();
+//    MX_MEMS_Library_Process(nine_axes);
+    num_samples++;
+    (void)snprintf(dataOut, FLASH_PAGE_SIZE, "Samples collected: %d\r\n", num_samples);
+    (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+  }
+  else
+  {
+    /*See if user wants to see sensor data printed on the console */
+    if(MX_APP_UART_Receive((uint8_t *)dataIn, 1, 10)==HAL_OK)
+    {
+      if(dataIn[0]=='r'||dataIn[0]=='R')
+      {
+        print_data();
+      }
+    }
+  }
 }
 
 //void print(char *str, char *strII)
 //{
-//	char dataOut[MAX_BUF_SIZE];
-//	(void)snprintf(dataOut, MAX_BUF_SIZE, str, strII);
-//	(void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+//  char dataOut[MAX_BUF_SIZE];
+//  (void)snprintf(dataOut, MAX_BUF_SIZE, str, strII);
+//  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
 //}
 /**
   * @brief System Clock Configuration

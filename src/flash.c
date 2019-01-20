@@ -96,11 +96,11 @@ void throw_error_via_led()
 
 }
 
-void write_page_without_erase(void * buffer,uint32_t page_st_addr)
+void write_page_without_erase(void * buffer,uint32_t page_st_addr, size_t size)
 {
 	HAL_FLASH_Unlock();
 	uint32_t bytes_written=0, start_addr=page_st_addr, *buffer_uint32=(uint32_t *)buffer;
-	while (bytes_written<FLASH_PAGE_SIZE)
+	while (bytes_written<size)//while (bytes_written<FLASH_PAGE_SIZE)
 	{
 		if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, start_addr, *buffer_uint32) == HAL_OK)//if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, start_addr, *((uint32_t*)buffer)) == HAL_OK)
 		{
@@ -116,10 +116,26 @@ void write_page_without_erase(void * buffer,uint32_t page_st_addr)
 		}
 	}
 
+//	bytes_written = 0;
+//	while (bytes_written < FLASH_PAGE_SIZE-size)
+//	{
+//		if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, start_addr, DATA_32) == HAL_OK)//if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, start_addr, *((uint32_t*)buffer)) == HAL_OK)
+//		{
+//			start_addr+=4;
+//			bytes_written+=4;
+//		}
+//		else
+//		{
+//		/* Error occurred while writing data in Flash memory.
+//		   User can add here some code to deal with this error */
+//		   throw_error_via_led();
+//		}
+//	}
+
 	start_addr=page_st_addr;
 	buffer_uint32=(uint32_t *)buffer;
 	/* Check the correctness of written data */
-	while (start_addr < page_st_addr+FLASH_PAGE_SIZE)
+	while (start_addr < page_st_addr+size)
 	{
 	  if((*(__IO uint32_t*) start_addr) != *buffer_uint32)
 	  {
@@ -128,5 +144,33 @@ void write_page_without_erase(void * buffer,uint32_t page_st_addr)
 	  start_addr += 4;
 	  buffer_uint32+=1;
 	}
+
+	HAL_FLASH_Lock();
+}
+
+void read_page(void * buffer, uint32_t page_st_addr, size_t size)
+{
+	HAL_FLASH_Unlock();
+	uint32_t bytes_written=0, start_addr=page_st_addr, *buffer_uint32=(uint32_t *)buffer;
+//	uint32_t buffer_fuck[FLASH_PAGE_SIZE];
+//	uint32_t *pt_buffer_fuck = buffer_fuck;
+
+	while (start_addr < page_st_addr+size)
+	{
+	  *buffer_uint32 = *(__IO uint32_t*) start_addr;
+
+	  start_addr += 4;
+	  buffer_uint32+=1;
+	}
+
+//	start_addr = page_st_addr+size;
+//	while (start_addr < page_st_addr+FLASH_PAGE_SIZE)
+//	{
+//	  *pt_buffer_fuck = *(__IO uint32_t*) start_addr;
+//
+//	  start_addr += 4;
+//	  pt_buffer_fuck+=1;
+//	}
+
 	HAL_FLASH_Lock();
 }

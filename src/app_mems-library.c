@@ -36,6 +36,11 @@ extern "C" {
 #include "iks01a2_motion_sensors_ex.h"
 #include "app_uart_interface.h"
 
+//
+//num 293 for fuck purposes
+#define ADDR_FLASH_PAGE_293 ((uint32_t)0x08012500) /* Base @ of Page 293, 256 bytes */
+#define ADDR_FLASH_PAGE_294 ((uint32_t)0x08012600) /* Base @ of Page 294, 256 bytes */
+#define DEBUG_SYS
 /* Private typedef -----------------------------------------------------------*/
 /**
  * @brief  Handle DEMO State Machine
@@ -72,6 +77,7 @@ volatile uint8_t MemsEventDetected = 0;
 volatile uint8_t PushButtonDetected = 0;
 DEMO_FIFO_STATUS_t DemoFifoStatus = STATUS_SET_FIFO_BYPASS_MODE;
 static char dataOut[MAX_BUF_SIZE];
+static char dataIn[MAX_BUF_SIZE];
 static uint8_t fifo_full_status = 0;
 static uint16_t num_samples = 0;
 static uint16_t prev_num_samples = 0;
@@ -97,6 +103,18 @@ void Display3Axes(int *three_axes);
 uint8_t SendOrientationRequest  = 0;
 void Get_Orientation(int *axes);
 void debug_printvalues(int *nine_axes);
+
+#define NUM_AXES (9 + 1) //1 for rain day
+typedef struct buffer_int
+{
+	int nine_axes[NUM_AXES];
+}gyro_xlro_buffer;
+
+#define NUM_SAMPLES  6//FLASH_PAGE_SIZE/sizeof(gyro_xlro_buffer);
+gyro_xlro_buffer g_x_data[NUM_SAMPLES];
+gyro_xlro_buffer g_x_data_flash[NUM_SAMPLES];
+uint32_t page_num = 0, num_pages=(ADDR_FLASH_PAGE_294-ADDR_FLASH_PAGE_293)/FLASH_PAGE_SIZE;
+int flash_has_samples=0;
 //AL
 /**
   * @brief  Initialize the MEMS application
@@ -131,16 +149,80 @@ void debug_printvalues(int *nine_axes)
 	DisplayOrientation(nine_axes+0);
 	Display3Axes(nine_axes+6);
 }
+
+void print_nine_axes(int *nine_axes)
+{
+	DisplayOrientation(nine_axes+0);
+	Display3Axes(nine_axes + 6);
+}
+
+void store_samples(gyro_xlro_buffer * pt_gyro_xlro_buffer, int * nine_axes, size_t size)
+{
+	static int index=0;
+	if (nine_axes && pt_gyro_xlro_buffer)
+	{
+		memcpy(pt_gyro_xlro_buffer[index++].nine_axes, nine_axes, size);
+	}
+
+	if (index==NUM_SAMPLES)
+	{
+    (void)snprintf(dataOut, FLASH_PAGE_SIZE, "Data to be copied into flash: \r\n");
+    (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+
+		page_num = (page_num == ADDR_FLASH_PAGE_293)?ADDR_FLASH_PAGE_294:ADDR_FLASH_PAGE_293;
+		erase_pages(page_num, num_pages);
+		write_page_without_erase(pt_gyro_xlro_buffer,page_num, NUM_SAMPLES * sizeof(gyro_xlro_buffer));
+		flash_has_samples=1;
+		index=0;
+    (void)snprintf(dataOut, FLASH_PAGE_SIZE, "Data copied into flash: \r\n");
+    (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+	}
+}
+
+//void read_page(void * buffer, uint32_t page_st_addr)
+void load_samples(gyro_xlro_buffer * pt_gyro_xlro_buffer)
+{
+	read_page(pt_gyro_xlro_buffer, page_num, sizeof(gyro_xlro_buffer) * NUM_SAMPLES);
+}
+
+uint8_t axes_are_valid (int * six_axes)
+{
+  uint8_t valid_axes=0;
+  uint8_t xl = (uint8_t)six_axes[0];
+  uint8_t xh = (uint8_t)six_axes[1];
+  uint8_t yl = (uint8_t)six_axes[2];
+  uint8_t yh = (uint8_t)six_axes[3];
+  uint8_t zl = (uint8_t)six_axes[4];
+  uint8_t zh = (uint8_t)six_axes[5];
+  if ( (xl == 0U && yl == 0U && zl == 0U && xh == 0U && yh == 1U && zh == 0U) ||
+       (xl == 1U && yl == 0U && zl == 0U && xh == 0U && yh == 0U && zh == 0U) ||
+       (xl == 0U && yl == 0U && zl == 0U && xh == 1U && yh == 0U && zh == 0U) ||
+       (xl == 0U && yl == 1U && zl == 0U && xh == 0U && yh == 0U && zh == 0U) ||
+       (xl == 0U && yl == 0U && zl == 0U && xh == 0U && yh == 0U && zh == 1U) ||
+       (xl == 0U && yl == 0U && zl == 1U && xh == 0U && yh == 0U && zh == 0U) )
+  {
+    valid_axes=1;
+  }
+
+  return valid_axes;
+}
 /**
   * @brief  Main process of the MEMS application
   * @retval None
   */
 void MX_MEMS_Library_Process(void)
 {
-	int nine_axes[9];
-//  MX_IKS01A2_LSM6DSL_FIFOMode_Process();
-	MX_IKS01A2_LSM6DSL_9AXESMode_Process(nine_axes+0);
-//	debug_printvalues(nine_axes);
+	int nine_axes[NUM_AXES];
+	MX_IKS01A2_LSM6DSL_9AXESMode_Process(nine_axes);
+// #ifdef DEBUG_SYS
+// 	debug_printvalues(nine_axes);
+// #endif
+  if (axes_are_valid(nine_axes) == 1)
+  {
+//    debug_printvalues(nine_axes);
+    store_samples(g_x_data,nine_axes, sizeof(nine_axes));
+  }
+
 }
 
 /**
@@ -234,10 +316,10 @@ void MX_IKS01A2_LSM6DSL_9AXESMode_Process(int *nine_axes)
       if ((num_samples != prev_num_samples))
       {
         prev_num_samples = num_samples;
-        (void)snprintf(dataOut, MAX_BUF_SIZE, ".");
-//        printf("%s", dataOut);
-//        fflush(stdout);
-        (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+//        (void)snprintf(dataOut, MAX_BUF_SIZE, ".");
+////        printf("%s", dataOut);
+////        fflush(stdout);
+//        (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
       }
       if (MemsEventDetected == 1U)
       {
@@ -782,6 +864,33 @@ static int32_t LSM6DSL_FIFO_Demo_Config(void)
   return ret;
 }
 
+void print_data(void)
+{
+#define MAX_BUF_SIZE 256
+	char dataOut[MAX_BUF_SIZE];
+	(void)snprintf(dataOut, MAX_BUF_SIZE,"\r\n\r\n Getting data from flash....\r\n\r\n");
+	(void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+
+	if (flash_has_samples)
+	{
+		load_samples(g_x_data_flash);
+		 for (int i=0;i<NUM_SAMPLES;i++)
+		 {
+		 	print_nine_axes(g_x_data_flash[i].nine_axes);
+		 }
+	}
+	else
+	{
+		(void)snprintf(dataOut, MAX_BUF_SIZE,"\r\n\r\n Sorry. Flash has no samples Fucker!\r\n\r\n");
+		(void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+	}
+//	if (flash_has_data)
+//		read from the flash and print it out.
+//	else
+//		print flash has no data
+
+}
+
 /**
   * @brief  Set FIFO bypass mode
   * @retval BSP status
@@ -795,9 +904,6 @@ static int32_t LSM6DSL_FIFO_Set_Bypass_Mode(void)
     return ret;
   }
 
-  (void)snprintf(dataOut, MAX_BUF_SIZE, "Press USER button to start the DEMO...\r\n");
-  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
-
   return ret;
 }
 
@@ -809,8 +915,8 @@ static int32_t LSM6DSL_FIFO_Set_FIFO_Mode(void)
 {
   int32_t ret;
 
-  (void)snprintf(dataOut, MAX_BUF_SIZE, "\r\nLSM6DSL starts to store the data into FIFO...\r\n\r\n");
-  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+//  (void)snprintf(dataOut, MAX_BUF_SIZE, "\r\nLSM6DSL starts to store the data into FIFO...\r\n\r\n");
+//  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
 
   HAL_Delay(1000);
 
@@ -843,14 +949,14 @@ static int32_t LSM6DSL_Read_All_FIFO_Data(int *three_axes)
   so the 'samples_to_read' has to be divided by 3 */
   samples_to_read /= 3U;
 
-  (void)snprintf(dataOut, MAX_BUF_SIZE,
-                 "\r\n\r\n%d samples in FIFO.\r\n\r\nStarted downloading data from FIFO...\r\n\r\n", samples_to_read);
-  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
-
-  HAL_Delay(1000);
-
-  (void)snprintf(dataOut, MAX_BUF_SIZE, "[DATA ##]     GYR_X     GYR_Y     GYR_Z\r\n");
-  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+//  (void)snprintf(dataOut, MAX_BUF_SIZE,
+//                 "\r\n\r\n%d samples in FIFO.\r\n\r\nStarted downloading data from FIFO...\r\n\r\n", samples_to_read);
+//  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+//
+//  HAL_Delay(1000);
+//
+//  (void)snprintf(dataOut, MAX_BUF_SIZE, "[DATA ##]     GYR_X     GYR_Y     GYR_Z\r\n");
+//  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
 
   //AL
   samples_to_read=1;
@@ -863,8 +969,8 @@ static int32_t LSM6DSL_Read_All_FIFO_Data(int *three_axes)
     }
   }
 
-  (void)snprintf(dataOut, MAX_BUF_SIZE, "\r\nFIFO download completed.\r\n\r\n");
-  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
+//  (void)snprintf(dataOut, MAX_BUF_SIZE, "\r\nFIFO download completed.\r\n\r\n");
+//  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
 
   return ret;
 }
@@ -912,7 +1018,7 @@ static int32_t LSM6DSL_Read_All_FIFO_Data(int *three_axes)
 void Display3Axes(int *three_axes)
 {
 	  int SampleIndex=1;
-	  (void)snprintf(dataOut, MAX_BUF_SIZE, "[DATA %02d]  %8ld  %8ld  %8ld\r\n", SampleIndex + 1U, three_axes[0], three_axes[1], three_axes[2]);
+	  (void)snprintf(dataOut, MAX_BUF_SIZE, "[DATA %02d]  %8ld %8ld %8ld\r\n", SampleIndex + 1U, three_axes[0], three_axes[1], three_axes[2]);
 	  (void)MX_APP_UART_Transmit((uint8_t *)dataOut, (uint16_t)strlen(dataOut), 5000);
 }
 /**
