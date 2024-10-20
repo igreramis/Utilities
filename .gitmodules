@@ -1,3 +1,6 @@
 [submodule "components/Utilities"]
 	path = components/Utilities
 	url = git@github.com:igreramis/Utilities.git
+[submodule "components/Doc"]
+	path = components/Doc
+	url = git@github.com:igreramis/Doc.git
